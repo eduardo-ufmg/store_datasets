@@ -52,12 +52,27 @@ def get_dataset_loaders() -> dict[str, dict[str, Any]]:
             "loader": fetch_sklearn_dataset,
             "args": {"name": "breast_cancer"},
         },
-        # OpenML datasets
+        # OpenML datasets (IDs chosen for popular classification tasks)
         "credit_g": {"loader": fetch_openml_dataset, "args": {"data_id": 31}},
         "diabetes_pima": {"loader": fetch_openml_dataset, "args": {"data_id": 37}},
-        # UCI ML Repo datasets
+        "phoneme": {"loader": fetch_openml_dataset, "args": {"data_id": 1489}},
+        "spambase": {"loader": fetch_openml_dataset, "args": {"data_id": 44}},
+        "bank_marketing": {"loader": fetch_openml_dataset, "args": {"data_id": 1461}},
+        "titanic": {"loader": fetch_openml_dataset, "args": {"data_id": 40945}},
+        "adult_openml": {"loader": fetch_openml_dataset, "args": {"data_id": 1590}},
+        "mnist_784": {"loader": fetch_openml_dataset, "args": {"data_id": 554}},
+        "fashion_mnist": {"loader": fetch_openml_dataset, "args": {"data_id": 40996}},
+        # UCI ML Repo datasets (IDs from ucimlrepo)
         "adult": {"loader": fetch_uci_dataset, "args": {"data_id": 2}},
         "mushroom": {"loader": fetch_uci_dataset, "args": {"data_id": 73}},
+        "car_evaluation": {"loader": fetch_uci_dataset, "args": {"data_id": 19}},
+        "heart_disease": {"loader": fetch_uci_dataset, "args": {"data_id": 45}},
+        "ionosphere": {"loader": fetch_uci_dataset, "args": {"data_id": 52}},
+        "banknote_authentication": {"loader": fetch_uci_dataset, "args": {"data_id": 21}},
+        "seeds": {"loader": fetch_uci_dataset, "args": {"data_id": 70}},
+        "statlog_german_credit": {"loader": fetch_uci_dataset, "args": {"data_id": 31}},
+        "yeast": {"loader": fetch_uci_dataset, "args": {"data_id": 73}},
+        "abalone": {"loader": fetch_uci_dataset, "args": {"data_id": 1}},
     }
 
 def fetch_sklearn_dataset(name: str) -> tuple[pd.DataFrame, pd.Series]:
