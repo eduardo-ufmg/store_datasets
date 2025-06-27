@@ -21,19 +21,21 @@ Dependencies:
 """
 
 import argparse
-import pandas as pd
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 # Import dataset loaders
 from sklearn.datasets import (
+    fetch_openml,
+    load_breast_cancer,
     load_iris,
     load_wine,
-    load_breast_cancer,
-    fetch_openml,
 )
 from sklearn.preprocessing import LabelEncoder
 from ucimlrepo import fetch_ucirepo
+
 
 def get_dataset_loaders() -> dict[str, dict[str, Any]]:
     """
@@ -68,12 +70,16 @@ def get_dataset_loaders() -> dict[str, dict[str, Any]]:
         "car_evaluation": {"loader": fetch_uci_dataset, "args": {"data_id": 19}},
         "heart_disease": {"loader": fetch_uci_dataset, "args": {"data_id": 45}},
         "ionosphere": {"loader": fetch_uci_dataset, "args": {"data_id": 52}},
-        "banknote_authentication": {"loader": fetch_uci_dataset, "args": {"data_id": 21}},
+        "banknote_authentication": {
+            "loader": fetch_uci_dataset,
+            "args": {"data_id": 21},
+        },
         "seeds": {"loader": fetch_uci_dataset, "args": {"data_id": 70}},
         "statlog_german_credit": {"loader": fetch_uci_dataset, "args": {"data_id": 31}},
         "yeast": {"loader": fetch_uci_dataset, "args": {"data_id": 73}},
         "abalone": {"loader": fetch_uci_dataset, "args": {"data_id": 1}},
     }
+
 
 def fetch_sklearn_dataset(name: str) -> tuple[pd.DataFrame, pd.Series]:
     """Loads a classification dataset from scikit-learn."""
@@ -88,11 +94,13 @@ def fetch_sklearn_dataset(name: str) -> tuple[pd.DataFrame, pd.Series]:
         raise ValueError(f"Unknown sklearn dataset name: {name}")
     return data.data, data.target
 
+
 def fetch_openml_dataset(data_id: int) -> tuple[pd.DataFrame, pd.Series]:
     """Fetches a classification dataset from OpenML by its ID."""
     print(f"  -> Fetching OpenML dataset ID: {data_id}")
     dataset = fetch_openml(data_id=data_id, as_frame=True, parser="auto")
     return dataset.data, dataset.target
+
 
 def fetch_uci_dataset(data_id: int) -> tuple[pd.DataFrame, pd.Series]:
     """Fetches a classification dataset from the UCI ML Repository by its ID."""
@@ -106,12 +114,7 @@ def fetch_uci_dataset(data_id: int) -> tuple[pd.DataFrame, pd.Series]:
     return X, y
 
 
-def process_and_save(
-    name: str,
-    X: pd.DataFrame,
-    y: pd.Series,
-    output_dir: Path
-):
+def process_and_save(name: str, X: pd.DataFrame, y: pd.Series, output_dir: Path):
     """
     Processes a raw dataset and saves it to a Parquet file.
 
@@ -125,9 +128,9 @@ def process_and_save(
 
     # 1. Handle potential missing values by filling with a placeholder or median
     # For simplicity, we fill categoricals with 'missing' and numerics with median.
-    for col in X.select_dtypes(include=['object', 'category']).columns:
-        X[col] = X[col].fillna('missing')
-    for col in X.select_dtypes(include=['number']).columns:
+    for col in X.select_dtypes(include=["object", "category"]).columns:
+        X[col] = X[col].fillna("missing")
+    for col in X.select_dtypes(include=["number"]).columns:
         X[col] = X[col].fillna(X[col].median())
 
     # 2. Encode target labels to be 0-indexed integers
@@ -138,14 +141,18 @@ def process_and_save(
     # 3. Identify and one-hot encode categorical features
     # Select columns with 'object' or 'category' dtype
     categorical_cols = X.select_dtypes(include=["object", "category"]).columns
-    
+
     if not categorical_cols.empty:
-        print(f"    - Found {len(categorical_cols)} categorical columns: {list(categorical_cols)}")
-        X_processed = pd.get_dummies(X, columns=categorical_cols, dummy_na=False, dtype=float)
+        print(
+            f"    - Found {len(categorical_cols)} categorical columns: {list(categorical_cols)}"
+        )
+        X_processed = pd.get_dummies(
+            X, columns=categorical_cols, dummy_na=False, dtype=float
+        )
     else:
         print("    - No categorical columns found.")
         X_processed = X.copy()
-        
+
     # Ensure all feature columns are of a type Parquet supports well
     for col in X_processed.columns:
         if pd.api.types.is_bool_dtype(X_processed[col]):
@@ -188,7 +195,7 @@ def main():
             loader_args = config["args"]
 
             features, target = loader_func(**loader_args)
-            
+
             if features.empty or target.empty:
                 print(f"  -> Skipping '{name}': No data returned.")
                 continue
