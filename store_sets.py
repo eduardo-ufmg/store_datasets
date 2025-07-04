@@ -1,89 +1,56 @@
-"""
-Fetches, processes, and stores multiple classification datasets in a normalized format.
-
-This script downloads datasets from various sources (sklearn, OpenML, UCI),
-encodes categorical features using one-hot encoding, normalizes the target
-labels to be zero-indexed integers, and saves the final dataframes in the
-efficient Parquet format.
-
-This preprocessing is done on the entire dataset without splitting, making it
-suitable for creating a repository of clean data ready for modeling pipelines.
-
-Usage:
-    python fetch_datasets.py ./path/to/save/data
-
-Dependencies:
-    - pandas
-    - scikit-learn
-    - pyarrow
-    - openml
-    - ucimlrepo
-"""
-
 import argparse
+import logging
+import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-
-# Import dataset loaders
-from sklearn.datasets import (
-    fetch_openml,
-    load_breast_cancer,
-    load_iris,
-    load_wine,
-)
+from sklearn.datasets import fetch_openml, load_breast_cancer, load_iris, load_wine
 from sklearn.preprocessing import LabelEncoder
 from ucimlrepo import fetch_ucirepo
 
 
+# ----------------------------------------------------------------------------
+# Dataset registry
+# ----------------------------------------------------------------------------
+
 def get_dataset_loaders() -> dict[str, dict[str, Any]]:
     """
-    Defines a registry of datasets to be fetched and processed.
-
-    Each entry contains a loader function and its required arguments.
+    Defines a registry of datasets to fetch and process.
 
     Returns:
-        A dictionary mapping a dataset name to its loader configuration.
+        A dict mapping dataset names to loader functions and arguments.
     """
     return {
-        # scikit-learn datasets (small, classic, good for testing)
         "iris": {"loader": fetch_sklearn_dataset, "args": {"name": "iris"}},
         "wine": {"loader": fetch_sklearn_dataset, "args": {"name": "wine"}},
-        "breast_cancer": {
-            "loader": fetch_sklearn_dataset,
-            "args": {"name": "breast_cancer"},
-        },
-        # OpenML datasets (IDs chosen for popular classification tasks)
+        "breast_cancer": {"loader": fetch_sklearn_dataset, "args": {"name": "breast_cancer"}},
+
         "credit_g": {"loader": fetch_openml_dataset, "args": {"data_id": 31}},
         "diabetes_pima": {"loader": fetch_openml_dataset, "args": {"data_id": 37}},
         "phoneme": {"loader": fetch_openml_dataset, "args": {"data_id": 1489}},
         "spambase": {"loader": fetch_openml_dataset, "args": {"data_id": 44}},
         "bank_marketing": {"loader": fetch_openml_dataset, "args": {"data_id": 1461}},
         "titanic": {"loader": fetch_openml_dataset, "args": {"data_id": 40945}},
-        "adult_openml": {"loader": fetch_openml_dataset, "args": {"data_id": 1590}},
-        "mnist_784": {"loader": fetch_openml_dataset, "args": {"data_id": 554}},
-        "fashion_mnist": {"loader": fetch_openml_dataset, "args": {"data_id": 40996}},
-        # UCI ML Repo datasets (IDs from ucimlrepo)
+
         "adult": {"loader": fetch_uci_dataset, "args": {"data_id": 2}},
         "mushroom": {"loader": fetch_uci_dataset, "args": {"data_id": 73}},
         "car_evaluation": {"loader": fetch_uci_dataset, "args": {"data_id": 19}},
         "heart_disease": {"loader": fetch_uci_dataset, "args": {"data_id": 45}},
         "ionosphere": {"loader": fetch_uci_dataset, "args": {"data_id": 52}},
-        "banknote_authentication": {
-            "loader": fetch_uci_dataset,
-            "args": {"data_id": 21},
-        },
+        "banknote_authentication": {"loader": fetch_uci_dataset, "args": {"data_id": 267}},
         "seeds": {"loader": fetch_uci_dataset, "args": {"data_id": 70}},
-        "statlog_german_credit": {"loader": fetch_uci_dataset, "args": {"data_id": 31}},
-        "yeast": {"loader": fetch_uci_dataset, "args": {"data_id": 73}},
-        "abalone": {"loader": fetch_uci_dataset, "args": {"data_id": 1}},
+        "yeast": {"loader": fetch_uci_dataset, "args": {"data_id": 73}}
     }
 
 
+# ----------------------------------------------------------------------------
+# Fetch functions
+# ----------------------------------------------------------------------------
+
 def fetch_sklearn_dataset(name: str) -> tuple[pd.DataFrame, pd.Series]:
-    """Loads a classification dataset from scikit-learn."""
-    print(f"  -> Fetching sklearn dataset: {name}")
+    logging.info("Fetching sklearn dataset: %s", name)
     if name == "iris":
         data = load_iris(as_frame=True)
     elif name == "wine":
@@ -91,123 +58,173 @@ def fetch_sklearn_dataset(name: str) -> tuple[pd.DataFrame, pd.Series]:
     elif name == "breast_cancer":
         data = load_breast_cancer(as_frame=True)
     else:
-        raise ValueError(f"Unknown sklearn dataset name: {name}")
-    return data.data, data.target
+        raise ValueError(f"Unknown sklearn dataset: {name}")
+    return data.data, data.target # pyright: ignore[reportAttributeAccessIssue]
 
 
 def fetch_openml_dataset(data_id: int) -> tuple[pd.DataFrame, pd.Series]:
-    """Fetches a classification dataset from OpenML by its ID."""
-    print(f"  -> Fetching OpenML dataset ID: {data_id}")
-    dataset = fetch_openml(data_id=data_id, as_frame=True, parser="auto")
-    return dataset.data, dataset.target
+    logging.info("Fetching OpenML ID: %s", data_id)
+    ds = fetch_openml(data_id=data_id, as_frame=True, parser="auto")
+    return ds.data, ds.target
 
 
 def fetch_uci_dataset(data_id: int) -> tuple[pd.DataFrame, pd.Series]:
-    """Fetches a classification dataset from the UCI ML Repository by its ID."""
-    print(f"  -> Fetching UCI dataset ID: {data_id}")
-    repo_fetch = fetch_ucirepo(id=data_id)
-    X = repo_fetch.data.features
-    y = repo_fetch.data.targets
-    # UCI repo often returns target as a DataFrame, so we squeeze it to a Series
+    logging.info("Fetching UCI repository ID: %s", data_id)
+    repo = fetch_ucirepo(id=data_id)
+    X = repo.data.features
+    y = repo.data.targets
     if isinstance(y, pd.DataFrame):
-        y = y.squeeze()
+        y = y.iloc[:, 0]
     return X, y
 
 
-def process_and_save(name: str, X: pd.DataFrame, y: pd.Series, output_dir: Path):
-    """
-    Processes a raw dataset and saves it to a Parquet file.
+# ----------------------------------------------------------------------------
+# Processing
+# ----------------------------------------------------------------------------
 
-    Parameters:
-        name: The common name for the dataset.
-        X: DataFrame of features.
-        y: Series of target labels.
-        output_dir: The directory where the Parquet file will be saved.
+def process_dataset(
+    name: str,
+    X: pd.DataFrame,
+    y: pd.Series,
+    output_dir: Path,
+    split: bool = False,
+    min_class_size: int = 10,
+) -> None:
     """
-    print(f"  -> Processing '{name}'...")
+    Preprocess and save dataset to Parquet (optional train/test splits).
+    Applies functional checks to drop small classes and invalid samples.
+    """
+    logging.info("Processing dataset: %s", name)
 
-    # 1. Handle potential missing values by filling with a placeholder or median
-    # For simplicity, we fill categoricals with 'missing' and numerics with median.
-    for col in X.select_dtypes(include=["object", "category"]).columns:
-        X[col] = X[col].fillna("missing")
-    for col in X.select_dtypes(include=["number"]).columns:
+    # Drop samples with missing target
+    mask_y = y.notna()
+    X, y = X.loc[mask_y], y.loc[mask_y]
+
+    # Drop classes with fewer than min_class_size samples
+    class_counts = y.value_counts()
+    valid_classes = class_counts[class_counts >= min_class_size].index
+    mask_cls = y.isin(valid_classes)
+    dropped_cls = len(y) - mask_cls.sum()
+    if dropped_cls > 0:
+        logging.warning("Dropped %d samples from small classes in %s", dropped_cls, name)
+    X, y = X.loc[mask_cls], y.loc[mask_cls]
+
+    # Fill missing values
+    for col in X.select_dtypes(include=["object", "category"]):
+        if X[col].dtype.name == 'category':
+            # For categorical columns, add "<missing>" to categories first
+            X[col] = X[col].cat.add_categories(["<missing>"])
+        X[col] = X[col].fillna("<missing>")
+    for col in X.select_dtypes(include=["number"]):
         X[col] = X[col].fillna(X[col].median())
 
-    # 2. Encode target labels to be 0-indexed integers
+    # One-hot encode categoricals
+    cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
+    if cat_cols:
+        X = pd.get_dummies(X, columns=cat_cols, dummy_na=False)
+
+    # Ensure all features numeric
+    X = X.apply(pd.to_numeric, errors="coerce")
+
+    # Drop samples with any invalid (NaN or infinite) features
+    X.replace([np.inf, -np.inf], np.nan, inplace=True)
+    mask_valid = X.notna().all(axis=1)
+    dropped_feat = len(X) - mask_valid.sum()
+    if dropped_feat > 0:
+        logging.warning("Dropped %d samples with invalid features in %s", dropped_feat, name)
+    X, y = X.loc[mask_valid], y.loc[mask_valid]
+
+    # Encode target
     le = LabelEncoder()
-    y_encoded = le.fit_transform(y)
-    y_df = pd.DataFrame(y_encoded, columns=["target"], index=X.index)
+    y_enc = pd.Series(le.fit_transform(y), name="target", index=X.index) # pyright: ignore[reportArgumentType, reportCallIssue]
 
-    # 3. Identify and one-hot encode categorical features
-    # Select columns with 'object' or 'category' dtype
-    categorical_cols = X.select_dtypes(include=["object", "category"]).columns
+    # Combine features + target
+    df = pd.concat([X, y_enc], axis=1)
 
-    if not categorical_cols.empty:
-        print(
-            f"    - Found {len(categorical_cols)} categorical columns: {list(categorical_cols)}"
+    # Save to Parquet
+    if split:
+        from sklearn.model_selection import train_test_split
+
+        train, test = train_test_split(
+            df, stratify=y_enc, test_size=0.2, random_state=42
         )
-        X_processed = pd.get_dummies(
-            X, columns=categorical_cols, dummy_na=False, dtype=float
-        )
+        for part, df_part in [("train", train), ("test", test)]:
+            path = output_dir / f"{name}_{part}.parquet"
+            df_part.to_parquet(path, index=False)
+            logging.info("Saved %s split for %s: %s", part, name, path)
     else:
-        print("    - No categorical columns found.")
-        X_processed = X.copy()
+        path = output_dir / f"{name}.parquet"
+        df.to_parquet(path, index=False)
+        logging.info("Saved dataset %s: %s", name, path)
 
-    # Ensure all feature columns are of a type Parquet supports well
-    for col in X_processed.columns:
-        if pd.api.types.is_bool_dtype(X_processed[col]):
-            X_processed[col] = X_processed[col].astype(int)
 
-    # 4. Combine features and target into a single DataFrame
-    final_df = pd.concat([X_processed, y_df], axis=1)
-
-    # 5. Save to Parquet file
-    output_path = output_dir / f"{name}.parquet"
-    final_df.to_parquet(output_path, index=False)
-    print(f"  -> Saved processed data to '{output_path}'")
-    print("-" * 40)
-
+# ----------------------------------------------------------------------------
+# Main orchestration
+# ----------------------------------------------------------------------------
 
 def main():
-    """Main function to orchestrate the fetching and processing of datasets."""
     parser = argparse.ArgumentParser(
-        description="Fetch and process classification datasets.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description="Fetch, process, and store classification datasets with quality checks."
     )
     parser.add_argument(
-        "output_dir",
-        type=Path,
-        help="Directory to save the processed Parquet files.",
+        "output_dir", type=Path, help="Directory for Parquet files."
+    )
+    parser.add_argument(
+        "--workers", type=int, default=1, help="Number of parallel workers."
+    )
+    parser.add_argument(
+        "--split", action="store_true", help="Also create train/test splits."
+    )
+    parser.add_argument(
+        "--min-class-size", type=int, default=10,
+        help="Minimum samples per class (drop smaller classes)."
+    )
+    parser.add_argument(
+        "--verbose", action="store_true", help="Enable debug logging."
     )
     args = parser.parse_args()
 
-    # Create the output directory if it doesn't exist
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Output directory: {args.output_dir.resolve()}")
-    print("=" * 40)
+    # Setup logging
+    level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        format="[%(asctime)s] %(levelname)s: %(message)s", level=level
+    )
 
-    dataset_loaders = get_dataset_loaders()
+    output_dir: Path = args.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logging.info("Output directory: %s", output_dir)
 
-    for name, config in dataset_loaders.items():
+    loaders = get_dataset_loaders()
+    tasks = []
+
+    # Parallel execution: fetch data
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        for name, cfg in loaders.items():
+            loader, loader_args = cfg["loader"], cfg["args"]
+            tasks.append(
+                executor.submit(lambda n, fn, kw: (n, fn(**kw)), name, loader, {**loader_args})
+            )
+
+        results = []
+        for future in as_completed(tasks):
+            try:
+                name, (X, y) = future.result()
+                results.append((name, X, y))
+            except Exception:
+                logging.exception("Failed to fetch dataset.")
+
+    # Process and save
+    for name, X, y in results:
         try:
-            print(f"Processing dataset: '{name}'")
-            loader_func = config["loader"]
-            loader_args = config["args"]
+            process_dataset(
+                name, X, y, output_dir,
+                split=args.split,
+                min_class_size=args.min_class_size,
+            )
+        except Exception:
+            logging.exception("Failed to process dataset %s.", name)
 
-            features, target = loader_func(**loader_args)
-
-            if features.empty or target.empty:
-                print(f"  -> Skipping '{name}': No data returned.")
-                continue
-
-            process_and_save(name, features, target, args.output_dir)
-
-        except Exception as e:
-            print(f"\n[ERROR] Failed to process dataset '{name}'.")
-            print(f"  Reason: {e}\n")
-            print("-" * 40)
-
-    print("All datasets processed.")
+    logging.info("All datasets processed.")
 
 
 if __name__ == "__main__":
