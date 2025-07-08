@@ -41,8 +41,8 @@ def get_dataset_loaders() -> dict[str, dict[str, Any]]:
         "heart_disease": {"loader": fetch_uci_dataset, "args": {"data_id": 45}},
         "ionosphere": {"loader": fetch_uci_dataset, "args": {"data_id": 52}},
         "banknote_authentication": {"loader": fetch_uci_dataset, "args": {"data_id": 267}},
-        "seeds": {"loader": fetch_uci_dataset, "args": {"data_id": 70}},
-        "yeast": {"loader": fetch_uci_dataset, "args": {"data_id": 73}}
+        "monk": {"loader": fetch_uci_dataset, "args": {"data_id": 70}},
+        "yeast": {"loader": fetch_uci_dataset, "args": {"data_id": 110}}
     }
 
 
