@@ -112,7 +112,6 @@ def process_dataset(
     # Fill missing values
     for col in X.select_dtypes(include=["object", "category"]):
         if X[col].dtype.name == 'category':
-            # For categorical columns, add "<missing>" to categories first
             X[col] = X[col].cat.add_categories(["<missing>"])
         X[col] = X[col].fillna("<missing>")
     for col in X.select_dtypes(include=["number"]):
@@ -126,20 +125,48 @@ def process_dataset(
     # Ensure all features numeric
     X = X.apply(pd.to_numeric, errors="coerce")
 
-    # Drop samples with any invalid (NaN or infinite) features
+    # --------------------------------------------------------------------
+    # Final Validation and Alignment
+    # --------------------------------------------------------------------
+    # 1. Ensure X and y have the same number of rows by aligning indices.
+    #    This handles cases where previous steps might have caused a mismatch.
+    if len(X) != len(y):
+        logging.warning(
+            "Mismatched lengths for X (%d) and y (%d) in %s. Aligning by index.",
+            len(X), len(y), name
+        )
+        common_index = X.index.intersection(y.index)
+        X = X.loc[common_index]
+        y = y.loc[common_index]
+
+    # 2. Drop any rows in X or y that still contain invalid values (NaN/inf).
+    #    This is a final safety check to ensure data integrity.
     X.replace([np.inf, -np.inf], np.nan, inplace=True)
-    mask_valid = X.notna().all(axis=1)
-    dropped_feat = len(X) - mask_valid.sum()
-    if dropped_feat > 0:
-        logging.warning("Dropped %d samples with invalid features in %s", dropped_feat, name)
-    X, y = X.loc[mask_valid], y.loc[mask_valid]
+    
+    # Create boolean masks for valid data in both X and y
+    mask_x_valid = X.notna().all(axis=1)
+    mask_y_valid = y.notna()
+    final_mask = mask_x_valid & mask_y_valid
+
+    dropped_count = len(X) - final_mask.sum()
+    if dropped_count > 0:
+        logging.warning(
+            "Dropped %d samples with invalid final values in %s.", dropped_count, name
+        )
+        X = X.loc[final_mask]
+        y = y.loc[final_mask]
+    # --------------------------------------------------------------------
 
     # Encode target
     le = LabelEncoder()
-    y_enc = pd.Series(le.fit_transform(y), name="target", index=X.index) # pyright: ignore[reportArgumentType, reportCallIssue]
+    y_enc = pd.Series(le.fit_transform(y), name="target", index=X.index) # type: ignore[reportArgumentType]
 
     # Combine features + target
     df = pd.concat([X, y_enc], axis=1)
+    
+    if df.empty:
+        logging.error("Dataset %s is empty after processing. Skipping.", name)
+        return
 
     # Save to Parquet
     if split:
