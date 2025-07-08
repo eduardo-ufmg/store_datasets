@@ -1,11 +1,12 @@
 import argparse
 import logging
 import numpy as np
+import pandas as pd
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 from sklearn.datasets import fetch_openml, load_breast_cancer, load_iris, load_wine
 from sklearn.preprocessing import LabelEncoder
 from ucimlrepo import fetch_ucirepo
@@ -87,12 +88,14 @@ def process_dataset(
     X: pd.DataFrame,
     y: pd.Series,
     output_dir: Path,
-    split: bool = False,
     min_class_size: int = 10,
-) -> None:
+) -> dict[str, Any] | None:
     """
-    Preprocess and save dataset to Parquet (optional train/test splits).
+    Preprocess and save dataset to Parquet.
     Applies functional checks to drop small classes and invalid samples.
+
+    Returns:
+        A dictionary with processing stats (name, samples, features) or None if skipped.
     """
     logging.info("Processing dataset: %s", name)
 
@@ -125,11 +128,7 @@ def process_dataset(
     # Ensure all features numeric
     X = X.apply(pd.to_numeric, errors="coerce")
 
-    # --------------------------------------------------------------------
     # Final Validation and Alignment
-    # --------------------------------------------------------------------
-    # 1. Ensure X and y have the same number of rows by aligning indices.
-    #    This handles cases where previous steps might have caused a mismatch.
     if len(X) != len(y):
         logging.warning(
             "Mismatched lengths for X (%d) and y (%d) in %s. Aligning by index.",
@@ -139,11 +138,7 @@ def process_dataset(
         X = X.loc[common_index]
         y = y.loc[common_index]
 
-    # 2. Drop any rows in X or y that still contain invalid values (NaN/inf).
-    #    This is a final safety check to ensure data integrity.
     X.replace([np.inf, -np.inf], np.nan, inplace=True)
-    
-    # Create boolean masks for valid data in both X and y
     mask_x_valid = X.notna().all(axis=1)
     mask_y_valid = y.notna()
     final_mask = mask_x_valid & mask_y_valid
@@ -155,7 +150,6 @@ def process_dataset(
         )
         X = X.loc[final_mask]
         y = y.loc[final_mask]
-    # --------------------------------------------------------------------
 
     # Encode target
     le = LabelEncoder()
@@ -166,23 +160,19 @@ def process_dataset(
     
     if df.empty:
         logging.error("Dataset %s is empty after processing. Skipping.", name)
-        return
+        return None
 
     # Save to Parquet
-    if split:
-        from sklearn.model_selection import train_test_split
+    path = output_dir / f"{name}.parquet"
+    df.to_parquet(path, index=False)
+    logging.info("Saved dataset %s: %s", name, path)
 
-        train, test = train_test_split(
-            df, stratify=y_enc, test_size=0.2, random_state=42
-        )
-        for part, df_part in [("train", train), ("test", test)]:
-            path = output_dir / f"{name}_{part}.parquet"
-            df_part.to_parquet(path, index=False)
-            logging.info("Saved %s split for %s: %s", part, name, path)
-    else:
-        path = output_dir / f"{name}.parquet"
-        df.to_parquet(path, index=False)
-        logging.info("Saved dataset %s: %s", name, path)
+    # Return statistics for the summary file
+    return {
+        "dataset": name,
+        "samples": df.shape[0],
+        "features": X.shape[1], # Number of feature columns
+    }
 
 
 # ----------------------------------------------------------------------------
@@ -197,10 +187,7 @@ def main():
         "output_dir", type=Path, help="Directory for Parquet files."
     )
     parser.add_argument(
-        "--workers", type=int, default=1, help="Number of parallel workers."
-    )
-    parser.add_argument(
-        "--split", action="store_true", help="Also create train/test splits."
+        "--workers", type=int, default=4, help="Number of parallel workers."
     )
     parser.add_argument(
         "--min-class-size", type=int, default=10,
@@ -240,16 +227,29 @@ def main():
             except Exception:
                 logging.exception("Failed to fetch dataset.")
 
-    # Process and save
+    # Process and save, collecting summaries along the way
+    dataset_summaries = []
     for name, X, y in results:
         try:
-            process_dataset(
+            summary = process_dataset(
                 name, X, y, output_dir,
-                split=args.split,
                 min_class_size=args.min_class_size,
             )
+            if summary:
+                dataset_summaries.append(summary)
         except Exception:
             logging.exception("Failed to process dataset %s.", name)
+
+    # Save the summary file
+    if dataset_summaries:
+        logging.info("Saving dataset summaries...")
+        summary_df = pd.DataFrame(dataset_summaries)
+        summary_df.sort_values("dataset", inplace=True)
+        summary_path = output_dir / "datasets_summary.csv"
+        summary_df.to_csv(summary_path, index=False)
+        logging.info("Dataset summary saved to: %s", summary_path)
+    else:
+        logging.warning("No datasets were successfully processed; summary file not created.")
 
     logging.info("All datasets processed.")
 
