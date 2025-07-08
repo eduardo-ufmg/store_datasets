@@ -89,6 +89,7 @@ def process_dataset(
     y: pd.Series,
     output_dir: Path,
     min_class_size: int = 10,
+    max_cardinality: int = 10,
 ) -> dict[str, Any] | None:
     """
     Preprocess and save dataset to Parquet.
@@ -119,6 +120,16 @@ def process_dataset(
         X[col] = X[col].fillna("<missing>")
     for col in X.select_dtypes(include=["number"]):
         X[col] = X[col].fillna(X[col].median())
+
+    cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
+    high_cardinality_cols = [
+        col for col in cat_cols if X[col].nunique() > max_cardinality
+    ]
+    if high_cardinality_cols:
+        logging.warning(
+            "In %s, dropping high-cardinality columns: %s", name, high_cardinality_cols
+        )
+        X = X.drop(columns=high_cardinality_cols)
 
     # One-hot encode categoricals
     cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
@@ -174,6 +185,22 @@ def process_dataset(
         "features": X.shape[1], # Number of feature columns
     }
 
+def fetch_and_process_wrapper(name, cfg, output_dir, min_class_size):
+    """Fetches and processes a single dataset, handling exceptions."""
+    try:
+        logging.info("Starting task for dataset: %s", name)
+        # 1. Fetch
+        loader, loader_args = cfg["loader"], cfg["args"]
+        X, y = loader(**loader_args)
+        
+        # 2. Process
+        summary = process_dataset(
+            name, X, y, output_dir, min_class_size=min_class_size
+        )
+        return summary
+    except Exception:
+        logging.exception("Failed to fetch and process dataset: %s", name)
+        return None
 
 # ----------------------------------------------------------------------------
 # Main orchestration
@@ -209,36 +236,25 @@ def main():
     logging.info("Output directory: %s", output_dir)
 
     loaders = get_dataset_loaders()
-    tasks = []
+    dataset_summaries = []
 
     # Parallel execution: fetch data
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        for name, cfg in loaders.items():
-            loader, loader_args = cfg["loader"], cfg["args"]
-            tasks.append(
-                executor.submit(lambda n, fn, kw: (n, fn(**kw)), name, loader, {**loader_args})
-            )
+        future_to_name = {
+            executor.submit(
+                fetch_and_process_wrapper,
+                name,
+                cfg,
+                output_dir,
+                args.min_class_size,
+            ): name
+            for name, cfg in loaders.items()
+        }
 
-        results = []
-        for future in as_completed(tasks):
-            try:
-                name, (X, y) = future.result()
-                results.append((name, X, y))
-            except Exception:
-                logging.exception("Failed to fetch dataset.")
-
-    # Process and save, collecting summaries along the way
-    dataset_summaries = []
-    for name, X, y in results:
-        try:
-            summary = process_dataset(
-                name, X, y, output_dir,
-                min_class_size=args.min_class_size,
-            )
+        for future in as_completed(future_to_name):
+            summary = future.result()
             if summary:
                 dataset_summaries.append(summary)
-        except Exception:
-            logging.exception("Failed to process dataset %s.", name)
 
     # Save the summary file
     if dataset_summaries:
