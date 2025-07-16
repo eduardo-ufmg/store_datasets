@@ -2,7 +2,7 @@ import argparse
 import os
 import pandas as pd
 import numpy as np
-from sklearn.datasets import fetch_openml, load_iris, load_wine, load_digits, load_breast_cancer, load_diabetes
+from sklearn.datasets import fetch_openml, fetch_20newsgroups, fetch_covtype, fetch_kddcup99, fetch_lfw_pairs, fetch_lfw_people, fetch_olivetti_faces, fetch_rcv1, load_breast_cancer, load_digits, load_iris, load_wine
 from sklearn.preprocessing import LabelEncoder
 from ucimlrepo import fetch_ucirepo
 
@@ -16,11 +16,17 @@ def fetch_sklearn_datasets():
     """
     print("Fetching datasets from Scikit-learn...")
     datasets = {
-        'iris': load_iris,
-        'wine': load_wine,
-        'digits': load_digits,
-        'breast_cancer': load_breast_cancer,
-        'diabetes': load_diabetes
+        "iris": load_iris,
+        "wine": load_wine,
+        "breast_cancer": load_breast_cancer,
+        "digits": load_digits,
+        "covtype": fetch_covtype,
+        "kddcup99": fetch_kddcup99,
+        "lfw_people": fetch_lfw_people,
+        "lfw_pairs": fetch_lfw_pairs,
+        "olivetti_faces": fetch_olivetti_faces,
+        "rcv1": fetch_rcv1,
+        "20newsgroups": fetch_20newsgroups
     }
     
     processed_datasets = {}
@@ -40,7 +46,7 @@ def fetch_sklearn_datasets():
 
 def fetch_openml_datasets():
     """
-    Fetches specified classification datasets from OpenML.
+    Fetches specified classification datasets from OpenML using their names.
     
     Returns:
         dict: A dictionary of DataFrames and their target column names.
@@ -52,14 +58,19 @@ def fetch_openml_datasets():
         188,   # eucalyptus
         1468,  # cnae-9
         1461,  # bank-marketing
-        151,   # irish
-        40668, # phoneme
-        1489,  # analcatdata_authorship
-        42729, # blood-transfusion-service-center
-        40966, # sylvine
+        451,   # irish
+        151,   # electricity
+        40668, # connect-4
+        1489,  # phoneme
+        458,   # analcatdata_authorship
+        42729, # nyc-taxi-green-dec-2016
+        1464,  # blood-transfusion-service-center
+        40966, # miceprotein
+        41146, # sylvine
         40996, # Fashion-MNIST
-        40978, # APSFailure
-        1464,  # banknote-authentication
+        40978, # Internet-Ads
+        41138, # APSFailure
+        1462,  # banknote-authentication
     ]
     
     processed_datasets = {}
@@ -69,11 +80,21 @@ def fetch_openml_datasets():
 
         try:
             dataset = fetch_openml(data_id=ds_id, as_frame=True, parser='auto')
+            
+            # Get the dataset name from metadata, default to ID if not found
+            dataset_name = dataset.details.get('name', str(ds_id))
+            
+            # Sanitize the name for use in a filename
+            sanitized_name = dataset_name.lower().replace(' ', '-').replace('_', '-').replace('(', '').replace(')', '')
+
             df = dataset.frame
             target_name = dataset.target_names[0]
             # Ensure target is of a basic type for consistent processing
             df[target_name] = df[target_name].astype(str)
-            processed_datasets[f"openml_{ds_id}"] = (df, target_name)
+
+            # Use the sanitized name for the dictionary key
+            processed_datasets[f"openml_{sanitized_name}"] = (df, target_name)
+
         except Exception as e:
             print(f"  - Failed to fetch OpenML dataset ID {ds_id}: {e}")
             
@@ -92,17 +113,21 @@ def fetch_uci_datasets():
         22,  # Chess (King-Rook vs. King-Pawn)
         2,   # Adult
         109, # Wine
-        850, # Heart Disease
-        159, # Statlog (Heart)
+        850, # Raisin
+        45,  # Heart Disease
+        159, # MAGIC Gamma Telescope
+        145, # Statlog (Heart)
         17,  # Breast Cancer Wisconsin (Diagnostic)
-        28,  # Contraceptive Method Choice
+        28,  # Japanese Credit Screening
+        30,  # Contraceptive Method Choice
         110, # Yeast
         12,  # Balance Scale
         1,   # Abalone
         42,  # Glass Identification
-        563, # Bike-sharing
+        563, # Iranian Churn
         174, # Parkinson's Disease
-        50,  # Statlog (German Credit)
+        50,  # Image Segmentation
+        144, # Statlog (German Credit)
     ]
 
     processed_datasets = {}
