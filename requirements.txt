@@ -1,6 +1,5 @@
 numpy
 pandas
-ucimlrepo
 scikit-learn
-pyarrow
-fastparquet
+ucimlrepo
+openml
