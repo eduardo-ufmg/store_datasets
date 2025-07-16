@@ -7,8 +7,7 @@ from typing import cast
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 
-from sklearn.datasets import (fetch_covtype, fetch_kddcup99, fetch_lfw_people, 
-                              fetch_olivetti_faces, load_breast_cancer, 
+from sklearn.datasets import (fetch_covtype, fetch_kddcup99, load_breast_cancer, 
                               load_digits, load_iris, load_wine)
 from sklearn.preprocessing import LabelEncoder
 from ucimlrepo import fetch_ucirepo
@@ -108,8 +107,7 @@ def fetch_process_and_save(task: dict):
             sanitized_name = f"sklearn_{ds_id}"
             loader = {
                 "iris": load_iris, "wine": load_wine, "breast_cancer": load_breast_cancer,
-                "digits": load_digits, "covtype": fetch_covtype, "kddcup99": fetch_kddcup99,
-                "lfw_people": fetch_lfw_people, "olivetti_faces": fetch_olivetti_faces
+                "digits": load_digits, "covtype": fetch_covtype, "kddcup99": fetch_kddcup99
             }[ds_id]
             bunch = loader()
             df = pd.DataFrame(data=bunch.data, columns=[f'feature_{i}' for i in range(bunch.data.shape[1])])
@@ -192,8 +190,7 @@ def main():
     tasks = []
     
     sklearn_datasets = [
-        "iris", "wine", "breast_cancer", "digits", "covtype", "kddcup99", 
-        "lfw_people", "olivetti_faces"
+        "iris", "wine", "breast_cancer", "digits", "covtype", "kddcup99"
     ]
     openml_ids = [
         44, 188, 1468, 1461, 451, 151, 40668, 1489, 458, 
@@ -201,7 +198,7 @@ def main():
     ]
     uci_ids = [
         22, 2, 109, 850, 45, 159, 145, 17, 28, 
-        30, 110, 12, 1, 42, 563, 174, 50, 144
+        30, 12, 1, 42, 563, 174, 50, 144
     ]
 
     for name in sklearn_datasets:
