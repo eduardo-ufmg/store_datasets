@@ -114,7 +114,7 @@ def fetch_process_and_save(task: dict):
     # --- 1. Fetching ---
     try:
         if source == "sklearn":
-            sanitized_name = f"sklearn_{ds_id}"
+            sanitized_name = ds_id
             loader = {
                 "iris": load_iris,
                 "wine": load_wine,
@@ -139,7 +139,7 @@ def fetch_process_and_save(task: dict):
                 download_features_meta_data=True,
             )
             dataset_name = dataset.name
-            sanitized_name = f"openml_{dataset_name.lower().replace(' ', '-').replace('_', '-').replace('(', '').replace(')', '')}"
+            sanitized_name = f"{dataset_name.lower().replace(' ', '-').replace('_', '-').replace('(', '').replace(')', '')}"
             df, _, _, _ = dataset.get_data(dataset_format="dataframe")
             target_name = dataset.default_target_attribute
 
@@ -148,7 +148,7 @@ def fetch_process_and_save(task: dict):
             dataset_name = dataset.metadata.get(
                 "slug", dataset.metadata.get("name", str(ds_id))
             )
-            sanitized_name = f"uci_{dataset_name.lower().replace(' ', '-').replace('(', '').replace(')', '')}"
+            sanitized_name = f"{dataset_name.lower().replace(' ', '-').replace('(', '').replace(')', '')}"
             df = dataset.data.features.copy()
             df["target"] = dataset.data.targets.iloc[:, 0]
             target_name = "target"
@@ -161,8 +161,6 @@ def fetch_process_and_save(task: dict):
             "n_samples": 0,
             "n_features": 0,
             "n_classes": 0,
-            "status": f"Failed: Could not fetch - {e}",
-            "saved_file": "N/A",
         }
 
     # --- 2. Preprocessing ---
@@ -173,8 +171,6 @@ def fetch_process_and_save(task: dict):
             "n_samples": 0,
             "n_features": 0,
             "n_classes": 0,
-            "status": "Failed: Dataframe was empty after fetch.",
-            "saved_file": "N/A",
         }
 
     df = cast(pd.DataFrame, df)  # Ensure df is a DataFrame
@@ -198,8 +194,6 @@ def fetch_process_and_save(task: dict):
             "n_samples": n_samples,
             "n_features": n_features,
             "n_classes": n_classes,
-            "status": "Success",
-            "saved_file": f"{sanitized_name}.csv",
         }
     else:
         return {
@@ -208,8 +202,6 @@ def fetch_process_and_save(task: dict):
             "n_samples": 0,
             "n_features": 0,
             "n_classes": 0,
-            "status": f"Failed: {status}",
-            "saved_file": "N/A",
         }
 
 
@@ -259,7 +251,7 @@ def main():
         41138,
         1462,
     ]
-    uci_ids = [22, 2, 109, 850, 45, 159, 145, 17, 28, 30, 12, 1, 42, 563, 174, 50, 144]
+    uci_ids = [22, 2, 186, 850, 45, 159, 145, 17, 28, 30, 12, 1, 42, 563, 174, 50, 144]
 
     for name in sklearn_datasets:
         tasks.append({"id": name, "source": "sklearn", "output_dir": args.output_dir})
@@ -297,8 +289,6 @@ def main():
                         "n_samples": 0,
                         "n_features": 0,
                         "n_classes": 0,
-                        "status": f"Failed: Critical error - {e}",
-                        "saved_file": "N/A",
                     }
                 )
 
